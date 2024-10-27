@@ -1,6 +1,6 @@
 [tool.poetry]
 package-mode = false
-name = "create-your-own-api-assistant-cisco-catalyst-center"
+name = "ai-dnac"
 version = "0.1.0"
 description = ""
 authors = ["flopach <florian.pachinger@gmail.com>"]
