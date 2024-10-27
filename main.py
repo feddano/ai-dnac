@@ -15,7 +15,7 @@ import chainlit as cl
 
 # Select the LLM which you would like to use.
 # "openai" or "ollama". You can also define the specific model below
-setting_chosen_LLM = "openai"
+setting_chosen_LLM = "ollama"
 
 # Do you want to extend the API specification from scratch?
 # True = Your chosen LLM will generate the existing base API documentation. This can take several hours.
@@ -37,7 +37,7 @@ if setting_chosen_LLM == "openai":
 else:
   # Open Source LLM: Create instance for Vector DB and LLM
   database = VectorDB("catcenter_vectors","ollama","chromadb/")
-  LLM = LLMOllama(database=database,model="llama3")
+  LLM = LLMOllama(database=database,model="llama3.1:latest")
 
 # Create DataHandler instance to import and embed data from local documents
 datahandler = DataHandler(database,LLM)

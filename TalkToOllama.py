@@ -2,13 +2,26 @@
 Cisco Sample Code License 1.1
 Author: flopach 2024
 """
-import ollama
+from openai import OpenAI
 import time
+from dotenv import load_dotenv
+import os
 import logging
 log = logging.getLogger("applogger")
 
+# Load environment variables
+load_dotenv()
+
+# Access environment variables
+OLLAMA_URL = os.getenv("OLLAMA_URL")
+OLLAMA_API = os.getenv("OPENAI_API_KEY")
+
 class LLMOllama:
-  def __init__(self, database, model = "llama3"):
+  def __init__(self, database, model = "llama3.1:latest"):
+    self.client = OpenAI(
+      base_url=f"{OLLAMA_URL}/v1",
+      api_key=OLLAMA_API
+    )
     self.database = database
     self.model = model
 
@@ -24,23 +37,23 @@ class LLMOllama:
     """
 
     # query vector DB for local data
-    # query without the where_clause to include context from the User Guide PDF
-    context_query = self.database.query_db(query_string,20)
+    context_query = self.database.query_db(query_string,10)
 
     # create promt message with local context data
     message = f'Query path: "{path}"\nREST operation: {operation}\nshort description: {query_string}\n{parameters}\nUse this context delimited with XML tags:\n<context>\n{context_query}\n</context>'
-    log.debug(f"===== Extending the description with:\n {message}")
+    log.debug(f"=== Extending the description with: ===\n {message}")
 
-    # ask LLM
-    response = ollama.chat(model=self.model, messages=[
-        {"role": "system",
-         "content": "You are provided information of a specific REST API query path of the Cisco Catalyst Center. Describe what this query is for. Describe how this query can be used from a user perspective."},
-        {"role": "user",
-         "content": message}
+    # ask GPT
+    completion = self.client.chat.completions.create(
+      model=self.model,
+      temperature=0.8,
+      messages=[
+        {"role": "system", "content": "You are provided information of a specific REST API query path of the Cisco Catalyst Center. Describe what this query is for in detail. Describe how this query can be used from a user perspective."},
+        {"role": "user", "content": message}
       ]
     )
 
-    return response['message']['content']
+    return completion.choices[0].message.content
 
   def ask_llm(self,query_string,n_results_apidocs=10,n_results_apispecs=20):
     """
@@ -63,14 +76,15 @@ class LLMOllama:
 
     question = f"\n\nUser question: '{query_string}'"
 
-    # assemble message for LLM with context + user question
     message = context + question
 
     log.debug(message)
 
-    response = ollama.chat(model=self.model, messages=[
-    {
-        "role": "system",
+    completion = self.client.chat.completions.create(
+      model=self.model,
+      temperature=0.8,
+      messages=[
+        { "role": "system",
         "content": """You are the Cisco Catalyst Center REST API and Python code assistant. You provide documentation and Python code for developers.
          Always list all available query parameters from the provided context. Include the REST operation and query path.
          1. you create documentation to the specific API calls. 
@@ -81,15 +95,14 @@ class LLMOllama:
          If the user does not have the access token, the user needs to call the REST API query '/dna/system/api/v1/auth/token' to receive the access token. Only the API query '/dna/system/api/v1/auth/token' is using the Basic authentication scheme, as defined in RFC 7617. All other API queries need to have the header parameter 'X-Auth-Token' defined.
          ###
         """
-    },{
-        'role': 'user',
-        'content': message,
-    }
-    ])
+        },
+        {"role": "user", "content": message}
+      ]
+    )
 
     # Calculate the total duration
     duration = round(time.time() - start_time, 2)
     exec_duration = f"The query '{query_string}' took **{duration} seconds** to execute."
     log.info(exec_duration)
 
-    return response['message']['content']+"\n\n"+exec_duration
+    return completion.choices[0].message.content+"\n\n"+exec_duration
