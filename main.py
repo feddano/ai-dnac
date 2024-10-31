@@ -8,6 +8,8 @@ from TalkToDatabase import VectorDB
 from ImportData import DataHandler
 import logging
 import chainlit as cl
+import json
+import os
 
 # ======================
 # SETTINGS
@@ -15,12 +17,15 @@ import chainlit as cl
 
 # Select the LLM which you would like to use.
 # "openai" or "ollama". You can also define the specific model below
-setting_chosen_LLM = "ollama"
+setting_chosen_LLM = "openai"
 
 # Do you want to extend the API specification from scratch?
 # True = Your chosen LLM will generate the existing base API documentation. This can take several hours.
 # False = Use the already generated JSON file (generated with GPT-3.5-turbo)
 setting_full_import = False
+
+# File to store chat history
+CHAT_HISTORY_FILE = "chat_history.json"
 
 # ======================
 # Instance creations
@@ -33,24 +38,41 @@ logging.getLogger("applogger").setLevel(logging.DEBUG)
 if setting_chosen_LLM == "openai":
   # OpenAI: Create instance for Vector DB and LLM
   database = VectorDB("catcenter_vectors","openai","chromadb/")
-  LLM = LLMOpenAI(database=database,model="gpt-3.5-turbo")
+  LLM = LLMOpenAI(database=database, chat_model="gpt-3.5-turbo", embedding_model="text-embedding-ada-002")
 else:
   # Open Source LLM: Create instance for Vector DB and LLM
   database = VectorDB("catcenter_vectors","ollama","chromadb/")
-  LLM = LLMOllama(database=database,model="llama3.1:latest")
+  LLM = LLMOllama(database=database, model="llama3.1:latest")
 
 # Create DataHandler instance to import and embed data from local documents
-datahandler = DataHandler(database,LLM)
+datahandler = DataHandler(database, LLM)
 
 # ======================
 # Chainlit functions
 # docs: https://docs.chainlit.io/get-started/overview
 # ======================
 
+# Global variable to store chat history
+chat_history = []
+
+def load_chat_history():
+  global chat_history
+  if os.path.exists(CHAT_HISTORY_FILE):
+    with open(CHAT_HISTORY_FILE, "r") as file:
+      chat_history = json.load(file)
+  else:
+    chat_history = []
+
+def save_chat_history():
+  global chat_history
+  with open(CHAT_HISTORY_FILE, "w") as file:
+    json.dump(chat_history, file)
+
 @cl.on_chat_start
 def on_chat_start():
+  global chat_history
+  load_chat_history()
   log.info("A new chat session has started!")
-
 
 @cl.on_message
 async def main(message: cl.Message):
@@ -61,6 +83,7 @@ async def main(message: cl.Message):
   Args:
      message: The user's message.
   """
+  global chat_history
 
   # trick for loader: https://docs.chainlit.io/concepts/message
   msg = cl.Message(content="")
@@ -71,16 +94,20 @@ async def main(message: cl.Message):
     msg.content = await import_data()
   else:
     # else, send the user_query to the LLM
-    msg.content = await ask_llm(message.content)
+    chat_history.append({"role": "user", "content": message.content})
+    msg.content = await ask_llm(message.content, chat_history)
+    save_chat_history()
 
   await msg.update()
 
 @cl.step
-async def ask_llm(query_string):
+async def ask_llm(query_string, chat_history):
   """
   Chainlit Step function: ask the LLM + return the result
   """
-  response = LLM.ask_llm(query_string)
+  response = LLM.ask_llm(query_string, chat_history, n_results_apidocs=10, n_results_apispecs=10, n_results_userguide=10)
+  chat_history.append({"role": "assistant", "content": response})
+  save_chat_history()
   return response
 
 @cl.step

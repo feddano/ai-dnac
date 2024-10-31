@@ -8,6 +8,9 @@ import fitz
 from bs4 import BeautifulSoup
 import requests
 import logging
+from PyPDF2 import PdfReader
+from TalkToDatabase import VectorDB
+
 log = logging.getLogger("applogger")
 
 class DataHandler:
@@ -15,24 +18,45 @@ class DataHandler:
         self.llm = LLM
         self.database = database
 
-    def scrape_pdfuserguide_catcenter(self,filepath):
+    def scrape_pdfuserguide_catcenter(self, filepath):
         """
         Scrape Catalyst Center PDF User Guide
         """
         try:
-            log.info(f"=== Start: Chunking + embedding PDF User Guide file ===")
-            with fitz.open(filepath) as doc:  # open document
-                content = chr(12).join([page.get_text() for page in doc])
+            log.info("=== Start: Chunking + embedding PDF User Guide file ===")
+            with open(filepath, "rb") as file:
+                reader = PdfReader(file)
+                text = []
+                for page in reader.pages:
+                    text.append(page.extract_text())
+                
+                log.info("Read the file successfully")
+                log.info("Cleaning chunks")
+                text_chunks = text
+                cleaned_chunks = [chunk for chunk in text_chunks if chunk]
+                
+                # Log the number of chunks
+                log.info(f"Total number of chunks: {len(cleaned_chunks)}")
 
-                chunks = self._chunk_text(content,512)
+                # For testing purposes, only send 5 chunks to the LLM
+                #test_chunks = cleaned_chunks[:5]
+                
+                # Generate embeddings for each chunk
+                embeddings = self.llm.get_embeddings(cleaned_chunks)
+                # Use the LLM instance to get embeddings
+                log.info("Successfully received embeddings")
 
+                # Update the VectorDB with the documents and their embeddings
+                log.info("Sending embedding data to VectorDB")
                 self.database.collection_add(
-                    documents=chunks,
-                    ids=[f"user_guide_{x}" for x in range(len(chunks))]
+                    documents=cleaned_chunks,
+                    embeddings=embeddings,
+                    ids=[f"user_guide_{x}" for x in range(len(cleaned_chunks))],
+                    metadatas=[{"doc_type": "userguide"} for _ in range(len(cleaned_chunks))]
                 )
-            log.info(f"=== End: Chunking + embedding PDF User Guide file ===")
+                log.info("Successfully sent embedded data to VectorDB")
         except Exception as e:
-            log.error(f"Error when reading PDF! Error: {e}")
+            log.error(f"Error when reading PDF! Error: {str(e)}")
 
     def scrape_apidocs_catcenter(self):
         """
@@ -72,7 +96,7 @@ class DataHandler:
 
                 #log.info(chunks)
 
-                self.database.collection_add(
+                self.database.collection_add2(
                     documents=chunks,
                     ids=[f"{doc}_{x}" for x in range(len(chunks))],
                     metadatas=[{ "doc_type" : "apidocs" } for x in range(len(chunks))]
@@ -117,7 +141,7 @@ class DataHandler:
                 # === put all information into vectorDB ===
 
                 # add into vectordb
-                self.database.collection_add(
+                self.database.collection_add2(
                     documents=document_chunks,
                     ids=ids,
                     metadatas=metadatas
@@ -210,7 +234,7 @@ class DataHandler:
                     # === put all information into vectorDB ===
 
                     # add into vectordb
-                    self.database.collection_add(
+                    self.database.collection_add2(
                         documents=document_chunks,
                         ids=ids,
                         metadatas=metadatas
@@ -231,15 +255,8 @@ class DataHandler:
 
         log.info(f"=== Extended, chunked, embedded the openapi specification into the vectorDB ===")
     
-    def _chunk_text(self,content,chunk_size):
+    def _chunk_text(self, text, chunk_size):
         """
-        The most basic method: Chunking by characters
-        + Replacing the new line character with a white space
-        + Removing any leading and trailing whitespaces
-
-        Args:
-            content (str): string to chunk
-            chunk_size (int): number of characters when to cut
+        Chunk the text into smaller pieces
         """
-        chunks = [content[i:i + chunk_size].replace("\n"," ").strip() for i in range(0, len(content), chunk_size)]
-        return chunks
+        return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
